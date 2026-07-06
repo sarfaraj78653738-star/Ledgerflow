@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LedgerFlow — Statement to Tally</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
+<style>
+  :root{
+    --paper: #eef1e6;
+    --paper-line: #c7d0b8;
+    --ink: #1f2b23;
+    --ink-soft: #4b5c4f;
+    --rule: #6f8f6a;
+    --accent: #2f6b52;
+    --accent-dark: #1f4a38;
+    --brass: #a9812f;
+    --warn: #b5442e;
+    --warn-bg: #f6e3dd;
+    --ok-bg: #dfe9d6;
+    --card: #f6f7ef;
+    --shadow: 0 1px 0 rgba(31,43,35,0.06);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:
+      repeating-linear-gradient(to bottom, transparent, transparent 27px, var(--paper-line) 28px),
+      var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    min-height:100vh;
+  }
+  .wrap{max-width:1100px;margin:0 auto;padding:28px 20px 80px;}
+
+  header.top{
+    display:flex;justify-content:space-between;align-items:flex-end;
+    border-bottom:3px double var(--rule);
+    padding-bottom:14px;margin-bottom:26px;
+    flex-wrap:wrap;gap:12px;
+  }
+  .brand{display:flex;align-items:baseline;gap:12px;}
+  .brand h1{
+    font-family:'Fraunces',serif;font-weight:700;font-size:34px;
+    margin:0;color:var(--accent-dark);letter-spacing:-0.01em;
+  }
+  .brand .tag{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft);
+    text-transform:uppercase;letter-spacing:0.12em;border:1px solid var(--rule);
+    padding:3px 8px;border-radius:2px;}
+  .topActions{display:flex;gap:8px;}
+
+  button{
+    font-family:'Inter',sans-serif;font-weight:600;font-size:13.5px;
+    border-radius:3px;border:1px solid var(--accent-dark);
+    padding:9px 15px;cursor:pointer;background:var(--card);color:var(--accent-dark);
+    transition:transform .08s ease, box-shadow .12s ease;
+  }
+  button:hover{box-shadow:var(--shadow);transform:translateY(-1px);}
+  button:active{transform:translateY(0);}
+  button.primary{background:var(--accent);border-color:var(--accent-dark);color:#fff;}
+  button.primary:hover{background:var(--accent-dark);}
+  button.ghost{background:transparent;border-color:var(--ink-soft);color:var(--ink-soft);}
+  button.danger{background:var(--warn-bg);border-color:var(--warn);color:var(--warn);}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none;}
+  button.small{padding:4px 9px;font-size:12px;}
+
+  .card{
+    background:var(--card);border:1px solid var(--paper-line);border-radius:6px;
+    padding:22px;margin-bottom:22px;box-shadow:var(--shadow);
+  }
+
+  #dropzone{
+    border:2px dashed var(--rule);border-radius:8px;
+    padding:38px 20px;text-align:center;cursor:pointer;
+    background:repeating-linear-gradient(135deg, transparent, transparent 10px, rgba(111,143,106,0.05) 10px, rgba(111,143,106,0.05) 20px);
+    transition:background .15s ease, border-color .15s ease;
+  }
+  #dropzone.drag{border-color:var(--accent);background:var(--ok-bg);}
+  #dropzone .big{font-family:'Fraunces',serif;font-size:20px;color:var(--accent-dark);margin-bottom:6px;}
+  #dropzone .small{font-size:13px;color:var(--ink-soft);}
+  #fileInput{display:none;}
+
+  .pipeline{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px;}
+  .stage{
+    font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:5px 10px;
+    border-radius:12px;background:#e3e6da;color:var(--ink-soft);border:1px solid var(--paper-line);
+  }
+  .stage.active{background:var(--brass);color:#fff;border-color:var(--brass);}
+  .stage.done{background:var(--accent);color:#fff;border-color:var(--accent-dark);}
+  .stage.error{background:var(--warn);color:#fff;border-color:var(--warn);}
+
+  .fileRow{display:flex;justify-content:space-between;align-items:center;font-size:13px;
+    padding:8px 0;border-bottom:1px solid var(--paper-line);}
+  .fileRow:last-child{border-bottom:none;}
+  .fileRow .name{font-weight:600;}
+  .fileRow .meta{color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-size:11.5px;}
+
+  .emptyState{text-align:center;padding:50px 20px;color:var(--ink-soft);}
+  .emptyState .stamp{
+    display:inline-block;font-family:'IBM Plex Mono',monospace;font-weight:600;
+    border:2px solid var(--ink-soft);color:var(--ink-soft);padding:8px 16px;
+    border-radius:4px;transform:rotate(-3deg);letter-spacing:.08em;margin-bottom:14px;
+  }
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{
+    text-align:left;font-family:'IBM Plex Mono',monospace;font-size:11px;
+    text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);
+    border-bottom:2px solid var(--rule);padding:8px 6px;position:sticky;top:0;background:var(--card);
+  }
+  tbody td{padding:6px;border-bottom:1px solid var(--paper-line);vertical-align:top;}
+  tbody tr.flag{background:var(--warn-bg);}
+  tbody tr:hover{background:#f0f2e8;}
+  td input, td select{
+    width:100%;border:1px solid transparent;background:transparent;
+    font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:4px;border-radius:3px;color:var(--ink);
+  }
+  td input:focus, td select:focus{border-color:var(--rule);background:#fff;outline:none;}
+  td.desc input{font-family:'Inter',sans-serif;font-size:12.5px;}
+  td.num input{text-align:right;}
+  .flagIcon{color:var(--warn);font-weight:700;cursor:help;}
+  .rowActions{display:flex;gap:4px;}
+
+  .summary{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px dashed var(--rule);}
+  .summary div{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-soft);}
+  .summary b{display:block;font-size:17px;color:var(--ink);font-family:'Fraunces',serif;}
+  .summary b.warn{color:var(--warn);}
+
+  .modalBg{position:fixed;inset:0;background:rgba(31,43,35,0.45);display:none;align-items:center;justify-content:center;z-index:50;padding:20px;}
+  .modalBg.open{display:flex;}
+  .modal{background:var(--card);border-radius:8px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;padding:26px;border:1px solid var(--paper-line);}
+  .modal h2{font-family:'Fraunces',serif;margin-top:0;color:var(--accent-dark);}
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em;}
+  .field input, .field select{width:100%;padding:9px 10px;border:1px solid var(--paper-line);border-radius:4px;font-family:'Inter',sans-serif;font-size:13.5px;background:#fff;}
+  .ruleRow{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center;}
+  .ruleRow input{padding:6px 8px;border:1px solid var(--paper-line);border-radius:4px;font-size:12.5px;}
+  .modalFoot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;border-top:1px solid var(--paper-line);padding-top:16px;}
+  .hint{font-size:12px;color:var(--ink-soft);margin-top:-8px;margin-bottom:14px;line-height:1.5;}
+
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+    background:var(--ink);color:#fff;padding:10px 18px;border-radius:5px;font-size:13px;
+    box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:100;opacity:0;transition:opacity .25s ease;pointer-events:none;}
+  .toast.show{opacity:1;}
+
+  @media (max-width:640px){
+    thead{display:none;}
+    tbody tr{display:block;border:1px solid var(--paper-line);border-radius:6px;margin-bottom:10px;padding:8px;}
+    tbody td{display:flex;justify-content:space-between;border-bottom:none;padding:4px 2px;}
+    tbody td::before{content:attr(data-label);font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-soft);margin-right:8px;flex-shrink:0;padding-top:6px;}
+    td input, td select{text-align:right;}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>LedgerFlow</h1>
+      <span class="tag">Statement → Tally</span>
+    </div>
+    <div class="topActions">
+      <button class="ghost" id="settingsBtn">Settings</button>
+      <button class="danger" id="resetBtn">Start fresh</button>
+    </div>
+  </header>
+
+  <div class="card">
+    <div id="dropzone">
+      <div class="big">Drop bank statement PDFs here</div>
+      <div class="small">or click to browse · text-based statements parse directly, scanned ones run through OCR automatically</div>
+      <input type="file" id="fileInput" accept="application/pdf" multiple>
+    </div>
+    <div class="pipeline" id="pipeline"></div>
+    <div id="fileList"></div>
+  </div>
+
+  <div class="card" id="tableCard">
+    <div id="tableWrap"></div>
+  </div>
+</div>
+
+<div class="modalBg" id="settingsModal">
+  <div class="modal">
+    <h2>Settings</h2>
+    <div class="field">
+      <label>Company name (as in Tally)</label>
+      <input type="text" id="companyName" placeholder="e.g. Acme Traders">
+    </div>
+    <div class="field">
+      <label>Bank ledger name (as in Tally)</label>
+      <input type="text" id="bankLedger" placeholder="e.g. HDFC Bank Current A/c">
+    </div>
+    <div class="field">
+      <label>Voucher type on export</label>
+      <select id="voucherMode">
+        <option value="journal">Journal (safest — works for any ledger setup)</option>
+        <option value="paymentReceipt">Payment / Receipt (needs bank ledger under Bank/Cash group)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Category → ledger mapping</label>
+      <div class="hint">Built-in rules already cover how CAs usually split bank statements: bank charges, TDS on interest, interest income vs. loan interest, etc. Anything unmatched goes to Suspense Account until you clarify it. Add your own rules below, or edit ledger names to match your Tally exactly.</div>
+      <div id="ruleRows"></div>
+      <button class="small ghost" id="addRule" type="button" style="margin-top:6px;">+ Add rule</button>
+    </div>
+    <div class="modalFoot">
+      <button class="ghost" id="closeSettings">Cancel</button>
+      <button class="primary" id="saveSettings">Save settings</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+
+const DEFAULT_RULES = [
+  // Category B — TDS (Journal, regardless of the global voucher mode)
+  {keyword:'tds', ledger:'TDS on Bank Interest Receivable A/c', direction:'any', voucherType:'Journal'},
+  // Category E — interest credited by the bank (income)
+  {keyword:'interest', ledger:'Bank Interest Income A/c', direction:'credit'},
+  // Category A — interest the bank charges you (on loan/OD)
+  {keyword:'interest', ledger:'Interest on Loan/OD A/c', direction:'debit'},
+  {keyword:'salary', ledger:'Salary Account', direction:'any'},
+  {keyword:'atm', ledger:'Cash Withdrawal', direction:'any'},
+  {keyword:'processing fee', ledger:'Processing Fees A/c', direction:'debit'},
+  {keyword:'bank charges', ledger:'Bank Charges A/c', direction:'debit'},
+  {keyword:'charges', ledger:'Bank Charges A/c', direction:'debit'},
+  {keyword:'cardfee', ledger:'Bank Charges A/c', direction:'debit'},
+  {keyword:'newcardissue', ledger:'Bank Charges A/c', direction:'debit'},
+  {keyword:'sms charges', ledger:'Bank Charges A/c', direction:'debit'},
+  {keyword:'fee', ledger:'Bank Charges A/c', direction:'debit'},
+  {keyword:'gst', ledger:'GST Payable', direction:'any'},
+  {keyword:'rent', ledger:'Rent Expense', direction:'debit'},
+];
+// Category C (identified customer receipts) and Category D (identified vendor
+// payments) are handled by recurring-party auto-detection giving each repeat
+// counterparty their own ledger. Anything left unmatched is Category F —
+// it falls through to "Suspense Account" in autoCategory() below, exactly
+// like an accountant would park an unidentified line until it's clarified.
+
+let settings = {
+  companyName: '',
+  bankLedger: 'Bank Account',
+  voucherMode: 'paymentReceipt',
+  rules: DEFAULT_RULES.slice()
+};
+
+let rows = []; // {id, date, desc, debit, credit, balance, category, source, flag, flagReason}
+let rowSeq = 1;
+let voucherSeq = 1;
+
+const $ = sel => document.querySelector(sel);
+const el = (tag, cls, html) => { const e = document.createElement(tag); if(cls) e.className = cls; if(html!==undefined) e.innerHTML = html; return e; };
+
+function toast(msg){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._h);
+  t._h = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+/* ---------------- Settings persistence ---------------- */
+async function loadSettings(){
+  try{
+    const res = await window.storage.get('ledgerflow:settings');
+    if(res && res.value){
+      const parsed = JSON.parse(res.value);
+      settings = Object.assign(settings, parsed);
+      if(!Array.isArray(settings.rules) || settings.rules.length===0) settings.rules = DEFAULT_RULES.slice();
+    }
+  }catch(e){ /* no saved settings yet */ }
+  renderSettingsForm();
+}
+async function saveSettingsToStorage(){
+  try{
+    await window.storage.set('ledgerflow:settings', JSON.stringify(settings));
+  }catch(e){ console.error('settings save failed', e); }
+}
+
+function renderSettingsForm(){
+  $('#companyName').value = settings.companyName || '';
+  $('#bankLedger').value = settings.bankLedger || '';
+  $('#voucherMode').value = settings.voucherMode || 'paymentReceipt';
+  const wrap = $('#ruleRows');
+  wrap.innerHTML = '';
+  settings.rules.forEach((r, i) => {
+    const row = el('div','ruleRow');
+    row.innerHTML = `
+      <input data-i="${i}" data-f="keyword" placeholder="keyword (e.g. salary)" value="${escapeAttr(r.keyword)}">
+      <span style="text-align:center;color:var(--ink-soft);font-size:12px;">→</span>
+      <input data-i="${i}" data-f="ledger" placeholder="Tally ledger name" value="${escapeAttr(r.ledger)}">
+      <button class="small ghost" data-del="${i}" type="button">✕</button>
+    `;
+    wrap.appendChild(row);
+  });
+  wrap.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('input', e => {
+      const i = +e.target.dataset.i, f = e.target.dataset.f;
+      settings.rules[i][f] = e.target.value;
+    });
+  });
+  wrap.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      settings.rules.splice(+e.target.dataset.del, 1);
+      renderSettingsForm();
+    });
+  });
+}
+function escapeAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
+
+$('#addRule').addEventListener('click', () => {
+  settings.rules.push({keyword:'', ledger:''});
+  renderSettingsForm();
+});
+$('#settingsBtn').addEventListener('click', () => $('#settingsModal').classList.add('open'));
+$('#closeSettings').addEventListener('click', () => { renderSettingsForm(); $('#settingsModal').classList.remove('open'); });
+$('#saveSettings').addEventListener('click', async () => {
+  settings.companyName = $('#companyName').value.trim();
+  settings.bankLedger = $('#bankLedger').value.trim() || 'Bank Account';
+  settings.voucherMode = $('#voucherMode').value;
+  settings.rules = settings.rules.filter(r => r.keyword.trim() && r.ledger.trim());
+  await saveSettingsToStorage();
+  $('#settingsModal').classList.remove('open');
+  toast('Settings saved');
+  renderTable();
+});
+
+/* ---------------- Reset ---------------- */
+$('#resetBtn').addEventListener('click', () => {
+  if(rows.length && !confirm('Clear all uploaded statements and parsed transactions? This cannot be undone.')) return;
+  rows = [];
+  $('#fileList').innerHTML = '';
+  $('#pipeline').innerHTML = '';
+  renderTable();
+  toast('Cleared');
+});
+
+/* ---------------- Upload handling ---------------- */
+const dropzone = $('#dropzone');
+const fileInput = $('#fileInput');
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+  handleFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+function setPipeline(stages, activeIdx, errorIdx){
+  const p = $('#pipeline');
+  p.innerHTML = '';
+  stages.forEach((s,i) => {
+    const b = el('span','stage', s);
+    if(errorIdx===i) b.classList.add('error');
+    else if(i < activeIdx) b.classList.add('done');
+    else if(i === activeIdx) b.classList.add('active');
+    p.appendChild(b);
+  });
+}
+
+async function handleFiles(fileList){
+  const files = Array.from(fileList).filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+  if(files.length===0){ toast('Please upload PDF files'); return; }
+  for(const file of files){
+    await processFile(file);
+  }
+  fileInput.value = '';
+}
+
+const STAGES = ['Reading PDF','Extracting text','OCR scan','Parsing rows','Ready'];
+
+async function extractViaText(pdf, metaEl){
+  let allTokens = [];
+  let pageTexts = [];
+  let totalChars = 0;
+  for(let p=1; p<=pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({scale:1});
+    const content = await page.getTextContent();
+    const toks = content.items
+      .filter(it => it.str && it.str.trim())
+      .map(it => ({
+        text: it.str,
+        x: it.transform[4] / viewport.width,
+        y: it.transform[5],
+        page: p
+      }));
+    totalChars += toks.reduce((a,t)=>a+t.text.length,0);
+    allTokens.push(...toks);
+    pageTexts.push(toks.map(t=>t.text).join(' '));
+  }
+  return {allTokens, pageTexts, avgCharsPerPage: totalChars / pdf.numPages};
+}
+
+async function extractViaOCR(pdf, metaEl){
+  let allTokens = [];
+  let pageTexts = [];
+  for(let p=1; p<=pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const scale = 3;
+    const viewport = page.getViewport({scale});
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    await page.render({canvasContext: ctx, viewport}).promise;
+    if(metaEl) metaEl.textContent = `OCR page ${p}/${pdf.numPages}…`;
+    const { data } = await Tesseract.recognize(canvas, 'eng');
+    (data.words || []).forEach(w => {
+      if(w.text && w.text.trim()){
+        allTokens.push({
+          text: w.text,
+          x: w.bbox.x0 / viewport.width,
+          y: -w.bbox.y0,
+          page: p
+        });
+      }
+    });
+    pageTexts.push(data.text || '');
+  }
+  return {allTokens, pageTexts};
+}
+
+function tryBothParsers(allTokens, pageTexts, sourceName){
+  let parsed = parseTokensToTransactions(allTokens, sourceName);
+  let method = 'column';
+  if(parsed.length === 0){
+    parsed = parseFlatText(pageTexts.join('\n'), sourceName);
+    method = 'flat';
+  }
+  return {parsed, method};
+}
+
+async function processFile(file){
+  const rowEl = el('div','fileRow', `<span class="name">${escapeHtml(file.name)}</span><span class="meta">reading…</span>`);
+  $('#fileList').prepend(rowEl);
+  const metaEl = rowEl.querySelector('.meta');
+  try{
+    setPipeline(STAGES, 0);
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+
+    setPipeline(STAGES, 1);
+    metaEl.textContent = `extracting text · ${pdf.numPages} page(s)`;
+    let { allTokens, pageTexts, avgCharsPerPage } = await extractViaText(pdf, metaEl);
+    setPipeline(STAGES, 1);
+
+    setPipeline(STAGES, 3);
+    metaEl.textContent = 'parsing transactions…';
+    let { parsed, method } = tryBothParsers(allTokens, pageTexts, file.name);
+    const textRowCount = parsed.length;
+    let ocrRowCount = null;
+    let ranOCR = false;
+    let usedOCRResult = false;
+
+    // Try OCR whenever the text layer looks thin OR found nothing — but don't
+    // just trust OCR blindly. Compare row counts and keep whichever actually
+    // found more transactions, since the text layer (when it decodes
+    // correctly) is exact, while OCR always carries some misread risk on
+    // dense small print.
+    if(parsed.length === 0 || avgCharsPerPage < 40){
+      setPipeline(STAGES, 2);
+      metaEl.textContent = parsed.length === 0
+        ? 'no rows found in text layer · trying OCR…'
+        : 'thin text layer detected · double-checking with OCR…';
+      const ocrResult = await extractViaOCR(pdf, metaEl);
+      ranOCR = true;
+      setPipeline(STAGES, 3);
+      const ocrParsed = tryBothParsers(ocrResult.allTokens, ocrResult.pageTexts, file.name);
+      ocrRowCount = ocrParsed.parsed.length;
+      if(ocrParsed.parsed.length > parsed.length){
+        parsed = ocrParsed.parsed;
+        method = ocrParsed.method;
+        pageTexts = ocrResult.pageTexts;
+        usedOCRResult = true;
+      }
+    }
+
+    rows.push(...parsed);
+    reconcileBalances();
+    applyPartyDetection();
+
+    // Cross-check against the statement's own printed grand totals, if present —
+    // catches extraction problems immediately instead of silently exporting
+    // wrong numbers.
+    const stmtTotals = extractStatementTotals(pageTexts.join('\n'));
+    const gotCredit = parsed.reduce((a,r)=>a+(parseFloat(r.credit)||0),0);
+    const gotDebit = parsed.reduce((a,r)=>a+(parseFloat(r.debit)||0),0);
+    let mismatchWarning = '';
+    if(stmtTotals.credit != null && Math.abs(stmtTotals.credit - gotCredit) > 1){
+      mismatchWarning += ` · ⚠ statement shows Total Credit ₹${stmtTotals.credit.toLocaleString('en-IN')} but only ₹${gotCredit.toLocaleString('en-IN')} was extracted`;
+    }
+    if(stmtTotals.debit != null && Math.abs(stmtTotals.debit - gotDebit) > 1){
+      mismatchWarning += ` · ⚠ statement shows Total Debit ₹${stmtTotals.debit.toLocaleString('en-IN')} but only ₹${gotDebit.toLocaleString('en-IN')} was extracted`;
+    }
+    const diagLine = `<div style="font-size:10.5px;color:var(--ink-soft);margin-top:3px;">diag: text layer found ${textRowCount} row(s) (avg ${Math.round(avgCharsPerPage)} chars/page)${ocrRowCount!=null ? `, OCR found ${ocrRowCount} row(s)` : ''}, used ${usedOCRResult ? 'OCR' : 'text layer'}</div>`;
+
+    setPipeline(STAGES, 4);
+    if(parsed.length === 0){
+      metaEl.innerHTML = `⚠ could not detect any transaction rows${ranOCR ? ' (tried text + OCR)' : ''} — <button class="small ghost" type="button" data-showraw>view extracted text</button>${diagLine}`;
+      const rawBtn = metaEl.querySelector('[data-showraw]');
+      if(rawBtn){
+        rawBtn.addEventListener('click', () => showRawTextPreview(file.name, pageTexts));
+      }
+    } else {
+      metaEl.innerHTML = `✓ ${parsed.length} transaction(s) found${method==='flat' ? ' (fallback parser — please double-check rows)' : ''}${usedOCRResult ? ' via OCR' : ''}${mismatchWarning ? `<br><span style="color:var(--warn)">${mismatchWarning}</span>` : ''} — <button class="small ghost" type="button" data-showraw>view extracted text</button>${diagLine}`;
+      const rawBtn = metaEl.querySelector('[data-showraw]');
+      if(rawBtn){
+        rawBtn.addEventListener('click', () => showRawTextPreview(file.name, pageTexts));
+      }
+    }
+    renderTable();
+  }catch(err){
+    console.error(err);
+    setPipeline(STAGES, 0, 0);
+    metaEl.textContent = 'failed — ' + (err.message || 'could not process file');
+  }
+}
+
+function extractStatementTotals(fullText){
+  // Many Indian bank statement exports print their own grand totals near the
+  // end (e.g. "Total Credit : 39,06,626.75"). Per-page subtotals use similar
+  // wording ("Page Total Credit"), so we explicitly skip any match that's
+  // immediately preceded by something ending in "...age" (Page/page, and
+  // common OCR misreads like Fage/Rage), and keep the LAST remaining match —
+  // the true grand total is printed once, after all page subtotals.
+  function lastNonPageMatch(re){
+    let m, val = null;
+    while((m = re.exec(fullText)) !== null){
+      const before = fullText.slice(Math.max(0, m.index-15), m.index).toLowerCase();
+      if(before.includes('age')) continue; // "Page Total ..." or an OCR misread of it
+      val = parseFloat(m[1].replace(/,/g,''));
+    }
+    return val;
+  }
+  return {
+    credit: lastNonPageMatch(/total\s*credit\s*:?\s*([\d,]+\.\d{2})/gi),
+    debit: lastNonPageMatch(/total\s*debit\s*:?\s*([\d,]+\.\d{2})/gi)
+  };
+}
+
+function showRawTextPreview(filename, pageTexts){
+  // Page 1 of many bank report exports is often just header/account-summary
+  // info with no transaction rows, so show a later page too — that's where
+  // real extraction problems actually show up.
+  const parts = [];
+  parts.push(`— page 1 (first ${Math.min(600,(pageTexts[0]||'').length)} chars) —\n` + ((pageTexts[0]||'').slice(0,600) || '(nothing extracted)'));
+  if(pageTexts.length > 1){
+    const pi = Math.min(1, pageTexts.length-1);
+    parts.push(`\n\n— page ${pi+1} (first ${Math.min(1200,(pageTexts[pi]||'').length)} chars) —\n` + ((pageTexts[pi]||'').slice(0,1200) || '(nothing extracted)'));
+  }
+  const sample = parts.join('');
+  const w = window.open('', '_blank', 'width=600,height=500');
+  if(!w){ toast('Please allow popups to view extracted text'); return; }
+  w.document.write(`<pre style="white-space:pre-wrap;font-family:monospace;font-size:12px;padding:16px;">${escapeHtml(filename)} — raw extracted text:\n\n${escapeHtml(sample)}</pre>`);
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ---------------- Shared date/number parsing helpers ---------------- */
+const DATE_RE = /^(\d{1,2})[\/\-\.](\d{1,2}|[A-Za-z]{3,9})[\/\-\.](\d{2,4})$/;
+const DATE_RE_LOOSE = /(\d{1,2})[\/\-\.](\d{1,2}|[A-Za-z]{3,9})[\/\-\.](\d{2,4})/;
+const NUM_RE = /^-?[\d,]+\.?\d*\s*(dr|cr)?$/i;
+const MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+
+function dateFromParts(d, mo, y){
+  if(y.length===2) y = (parseInt(y)>50?'19':'20')+y;
+  let month = parseInt(mo);
+  if(isNaN(month)){
+    const key = mo.slice(0,3).toLowerCase();
+    month = MONTHS[key];
+  }
+  if(!month) return null;
+  d = parseInt(d);
+  if(d<1||d>31||month<1||month>12) return null;
+  return `${y}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+function tryDate(str){
+  const s = (str||'').trim();
+  const m = s.match(DATE_RE);
+  if(!m) return null;
+  return dateFromParts(m[1], m[2], m[3]);
+}
+function parseNum(str){
+  if(!str) return null;
+  const s = str.trim();
+  if(!NUM_RE.test(s)) return null;
+  const isCr = /cr/i.test(s);
+  const isDr = /dr/i.test(s);
+  const clean = s.replace(/[^\d.\-]/g,'');
+  if(clean==='' || clean==='-') return null;
+  let v = parseFloat(clean);
+  if(isNaN(v)) return null;
+  return {value: Math.abs(v), sign: isCr ? 1 : (isDr ? -1 : null)};
+}
+
+/* ---------------- Fallback parser: for statements that don't lay out in
+   clean columns (e.g. a single running amount + suffixed balance, with
+   dates/description/amount all run together on one text line) ---------------- */
+function parseFlatText(fullText, sourceName){
+  // date date description amount balance(Cr|Dr)
+  const RECORD_RE = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*(cr|dr)\b/gi;
+  const results = [];
+  let prevSignedBalance = null;
+  let m;
+  while((m = RECORD_RE.exec(fullText)) !== null){
+    const dateVal = tryDate(m[1]) || tryDate(m[2]);
+    if(!dateVal) continue;
+    const desc = m[3].replace(/\s+/g,' ').trim().slice(0,140);
+    const amount = parseFloat(m[4].replace(/,/g,''));
+    const balanceRaw = parseFloat(m[5].replace(/,/g,''));
+    const balSign = /cr/i.test(m[6]) ? 1 : -1;
+    const signedBalance = balanceRaw * balSign;
+    if(isNaN(amount) || isNaN(balanceRaw)) continue;
+
+    let debit=null, credit=null, flag=false, flagReason='';
+    if(prevSignedBalance !== null){
+      const diff = signedBalance - prevSignedBalance;
+      if(diff >= 0) credit = amount; else debit = amount;
+      if(Math.abs(Math.abs(diff) - amount) > 0.5){
+        flag = true;
+        flagReason = 'Amount does not match the change in balance — please verify debit/credit';
+      }
+    } else {
+      credit = amount; // best guess for the first row in the file
+      flag = true;
+      flagReason = 'First row in file — please verify debit vs credit direction';
+    }
+    prevSignedBalance = signedBalance;
+
+    results.push({
+      id: rowSeq++,
+      date: dateVal,
+      desc: desc || '(no description)',
+      debit, credit,
+      balance: balanceRaw,
+      category: autoCategory(desc, debit != null),
+      source: sourceName,
+      flag, flagReason,
+      catManuallySet: false
+    });
+  }
+  return results;
+}
+
+/* ---------------- Parsing: group tokens into visual rows/columns ---------------- */
+function parseTokensToTransactions(tokens, sourceName){
+  if(tokens.length===0) return [];
+  // group by page then by y (rounded, tolerant of small jitter)
+  const byPage = {};
+  tokens.forEach(t => { (byPage[t.page] = byPage[t.page] || []).push(t); });
+
+  const lines = [];
+  Object.values(byPage).forEach(pageTokens => {
+    pageTokens.sort((a,b) => b.y - a.y);
+    let current = [];
+    let lastY = null;
+    pageTokens.forEach(t => {
+      if(lastY === null || Math.abs(t.y - lastY) < 3){
+        current.push(t);
+      } else {
+        lines.push(current);
+        current = [t];
+      }
+      lastY = t.y;
+    });
+    if(current.length) lines.push(current);
+  });
+
+  // convert each line into ordered "cells" by clustering on x-gaps
+  const GAP_THRESHOLD = 0.018; // fraction of page width
+  const cellLines = lines.map(lineTokens => {
+    lineTokens.sort((a,b) => a.x - b.x);
+    const cells = [];
+    let cur = [lineTokens[0]];
+    for(let i=1;i<lineTokens.length;i++){
+      const gap = lineTokens[i].x - (cur[cur.length-1].x);
+      if(gap > GAP_THRESHOLD){
+        cells.push(cur);
+        cur = [lineTokens[i]];
+      } else {
+        cur.push(lineTokens[i]);
+      }
+    }
+    cells.push(cur);
+    return cells.map(c => c.map(t=>t.text).join(' ').trim());
+  });
+
+  const results = [];
+  let pendingDesc = [];
+  let lastRow = null;
+  let runningBalance = null;
+
+  cellLines.forEach(cells => {
+    if(cells.length===0) return;
+    const dateVal = tryDate(cells[0]);
+    if(!dateVal){
+      // continuation line — append to previous row's description if plausible (short, no numbers-only line)
+      if(lastRow && cells.join(' ').length < 120 && !cells.every(c=>NUM_RE.test(c))){
+        lastRow.desc += ' ' + cells.join(' ');
+      }
+      return;
+    }
+    // some statements print a second date (e.g. value date) right after the first
+    let dateIdx = 1;
+    if(cells.length > 1 && tryDate(cells[1])) dateIdx = 2;
+
+    // find where the numeric run starts (first numeric cell after the date(s)),
+    // then take the contiguous numeric cells from there. Anything after that run
+    // (e.g. trailing transaction-code columns like "CDCI CDCI") is ignored —
+    // we don't scan from the end, since trailing non-numeric columns would
+    // otherwise hide the amounts entirely.
+    let numStart = -1;
+    for(let i=dateIdx;i<cells.length;i++){
+      if(parseNum(cells[i])){ numStart = i; break; }
+    }
+    const numCells = [];
+    if(numStart !== -1){
+      for(let i=numStart;i<cells.length;i++){
+        const n = parseNum(cells[i]);
+        if(n){ numCells.push({idx:i, ...n}); } else break;
+      }
+    }
+    const descCells = cells.slice(dateIdx, numStart !== -1 ? numStart : cells.length);
+    const desc = descCells.join(' ').trim();
+
+    let debit=null, credit=null, balance=null, flag=false, flagReason='';
+    if(numCells.length >= 3){
+      // assume debit, credit, balance order
+      debit = numCells[numCells.length-3].value || null;
+      credit = numCells[numCells.length-2].value || null;
+      balance = numCells[numCells.length-1].value;
+      // zero out whichever is actually blank-like (0.00 both can happen if col empty printed as 0)
+    } else if(numCells.length === 2){
+      // amount + balance, need Dr/Cr sign to know direction
+      const amt = numCells[0];
+      balance = numCells[1].value;
+      if(amt.sign === 1) credit = amt.value;
+      else if(amt.sign === -1) debit = amt.value;
+      else if(runningBalance !== null){
+        // no explicit sign — infer direction from whether the balance rose or fell
+        const diff = balance - runningBalance;
+        if(diff >= 0) credit = amt.value; else debit = amt.value;
+        if(Math.abs(Math.abs(diff) - amt.value) > 0.5){
+          flag = true; flagReason = 'Amount does not match the change in balance — please verify';
+        }
+      } else {
+        credit = amt.value;
+        flag = true; flagReason = 'First row — please verify debit/credit direction';
+      }
+    } else if(numCells.length === 1){
+      flag = true; flagReason = 'Only one amount column found — please verify';
+      debit = numCells[0].value;
+    } else {
+      return; // no numbers at all, skip
+    }
+
+    const category = autoCategory(desc, debit != null);
+    if(balance !== null && !isNaN(balance)) runningBalance = balance;
+    lastRow = {
+      id: rowSeq++,
+      date: dateVal,
+      desc: desc || '(no description)',
+      debit: debit || null,
+      credit: credit || null,
+      balance: balance,
+      category,
+      source: sourceName,
+      flag, flagReason,
+      catManuallySet: false
+    };
+    results.push(lastRow);
+  });
+
+  return results;
+}
+
+function normKey(s){
+  return (s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+}
+
+function autoCategory(desc, isDebit){
+  const normDesc = normKey(desc);
+  for(const r of settings.rules){
+    if(!r.keyword) continue;
+    if(r.direction === 'credit' && isDebit === true) continue; // rule only applies to money in
+    if(r.direction === 'debit' && isDebit === false) continue; // rule only applies to money out
+    if(normDesc.includes(normKey(r.keyword))) return r.ledger;
+  }
+  // Nothing matched — this is Category F, the "unidentified" bucket.
+  // An accountant parks these in Suspense until the client/CA clarifies them.
+  return 'Suspense Account';
+}
+
+/* ---------------- Recurring-party detection ----------------
+   Bank narrations for IMPS/NEFT transfers usually carry the counterparty's
+   name. If the same party shows up repeatedly, an accountant would normally
+   give them their own ledger rather than lump them into a generic head —
+   so we detect that automatically. */
+function extractParty(desc){
+  if(!desc) return null;
+  let m = desc.match(/IMPS\/P2A\/\d+\/([A-Z0-9.& ]{3,40}?)\/[A-Za-z0-9]+\s*$/i);
+  if(m) return m[1].trim();
+  m = desc.match(/NEFT[-\/][A-Z0-9]+[-\/](.{3,50}?)\s*$/i);
+  if(m) return m[1].trim();
+  return null;
+}
+function formatPartyName(raw){
+  const cleaned = (raw||'').replace(/[^A-Za-z0-9& ]+/g,' ').replace(/\s+/g,' ').trim();
+  return cleaned.split(' ').map(w =>
+    w.length ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : w
+  ).join(' ');
+}
+function applyPartyDetection(){
+  const counts = {}; // normalized key -> {display, count}
+  rows.forEach(r => {
+    const p = extractParty(r.desc);
+    if(!p) return;
+    const key = normKey(p);
+    if(!key) return;
+    if(!counts[key]) counts[key] = {display: formatPartyName(p), count: 0};
+    counts[key].count++;
+  });
+  let added = false;
+  Object.values(counts).forEach(info => {
+    if(info.count >= 3){
+      const exists = settings.rules.some(r => normKey(r.keyword) === normKey(info.display));
+      if(!exists){
+        settings.rules.push({keyword: info.display, ledger: info.display});
+        added = true;
+      }
+    }
+  });
+  if(added){
+    saveSettingsToStorage();
+    // re-run categorization, but only for rows the user hasn't manually corrected
+    rows.forEach(r => {
+      if(!r.catManuallySet) r.category = autoCategory(r.desc, r.debit != null);
+    });
+  }
+}
+
+/* ---------------- Balance reconciliation check ---------------- */
+function reconcileBalances(){
+  const bySource = {};
+  rows.forEach(r => { (bySource[r.source] = bySource[r.source] || []).push(r); });
+  Object.values(bySource).forEach(list => {
+    list.sort((a,b) => a.date.localeCompare(b.date) || a.id-b.id);
+    let prevBal = null;
+    list.forEach(r => {
+      if(r.balance!=null && prevBal!=null){
+        const expected = prevBal + (r.credit||0) - (r.debit||0);
+        if(Math.abs(expected - r.balance) > 0.5){
+          r.flag = true;
+          r.flagReason = (r.flagReason ? r.flagReason+'; ' : '') + `Balance doesn't match running total (expected ≈${expected.toFixed(2)})`;
+        }
+      }
+      if(r.balance!=null) prevBal = r.balance;
+    });
+  });
+}
+
+/* ---------------- Table rendering ---------------- */
+function renderTable(){
+  const wrap = $('#tableWrap');
+  if(rows.length===0){
+    wrap.innerHTML = `<div class="emptyState">
+      <div class="stamp">EMPTY LEDGER</div>
+      <div>Upload a bank statement PDF above to get started.</div>
+    </div>`;
+    return;
+  }
+  const ledgerOptions = Array.from(new Set(['Suspense Account', ...settings.rules.map(r=>r.ledger)]));
+  let html = `<table><thead><tr>
+    <th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Ledger</th><th></th>
+  </tr></thead><tbody>`;
+  rows.forEach(r => {
+    html += `<tr data-id="${r.id}" class="${r.flag?'flag':''}">
+      <td data-label="Date"><input type="date" value="${r.date}" data-f="date"></td>
+      <td class="desc" data-label="Description">
+        <input type="text" value="${escapeAttr(r.desc)}" data-f="desc">
+        ${r.flag ? `<span class="flagIcon" title="${escapeAttr(r.flagReason)}">⚠</span>` : ''}
+      </td>
+      <td class="num" data-label="Debit"><input type="number" step="0.01" value="${r.debit ?? ''}" data-f="debit"></td>
+      <td class="num" data-label="Credit"><input type="number" step="0.01" value="${r.credit ?? ''}" data-f="credit"></td>
+      <td class="num" data-label="Balance"><input type="number" step="0.01" value="${r.balance ?? ''}" data-f="balance"></td>
+      <td data-label="Ledger">
+        <select data-f="category">
+          ${ledgerOptions.map(l => `<option value="${escapeAttr(l)}" ${l===r.category?'selected':''}>${escapeHtml(l)}</option>`).join('')}
+        </select>
+      </td>
+      <td data-label=""><div class="rowActions"><button class="small ghost" data-del="${r.id}" type="button">✕</button></div></td>
+    </tr>`;
+  });
+  html += `</tbody></table>`;
+
+  const totalDebit = rows.reduce((a,r)=>a+(parseFloat(r.debit)||0),0);
+  const totalCredit = rows.reduce((a,r)=>a+(parseFloat(r.credit)||0),0);
+  const flagCount = rows.filter(r=>r.flag).length;
+  const suspenseCount = rows.filter(r=>r.category==='Suspense Account').length;
+
+  html += `<div class="summary">
+    <div>Transactions<b>${rows.length}</b></div>
+    <div>Total debit<b>₹${totalDebit.toLocaleString('en-IN',{minimumFractionDigits:2})}</b></div>
+    <div>Total credit<b>₹${totalCredit.toLocaleString('en-IN',{minimumFractionDigits:2})}</b></div>
+    <div>Flagged for review<b class="${flagCount?'warn':''}">${flagCount}</b></div>
+    <div>Uncategorized (Suspense)<b class="${suspenseCount?'warn':''}">${suspenseCount}</b></div>
+  </div>
+  <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
+    <button class="ghost small" id="addRowBtn" type="button">+ Add manual row</button>
+    <button class="primary" id="exportBtn" type="button" style="margin-left:auto;">Export Tally XML</button>
+  </div>`;
+
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll('tbody input, tbody select').forEach(inp => {
+    inp.addEventListener('change', e => {
+      const tr = e.target.closest('tr');
+      const id = +tr.dataset.id;
+      const row = rows.find(r=>r.id===id);
+      const f = e.target.dataset.f;
+      let v = e.target.value;
+      if(f==='debit'||f==='credit'||f==='balance') v = v===''? null : parseFloat(v);
+      row[f] = v;
+      if(f==='debit' && v) row.credit = null;
+      if(f==='credit' && v) row.debit = null;
+      if(f==='category') row.catManuallySet = true;
+      reconcileBalances();
+      renderTable();
+    });
+  });
+  wrap.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const id = +e.target.dataset.del;
+      rows = rows.filter(r=>r.id!==id);
+      renderTable();
+    });
+  });
+  const addBtn = $('#addRowBtn');
+  if(addBtn) addBtn.addEventListener('click', () => {
+    rows.push({id:rowSeq++, date:new Date().toISOString().slice(0,10), desc:'', debit:null, credit:null, balance:null, category:'Suspense Account', source:'manual', flag:false, flagReason:'', catManuallySet:false});
+    renderTable();
+  });
+  const exportBtn = $('#exportBtn');
+  if(exportBtn) exportBtn.addEventListener('click', exportTallyXML);
+}
+
+/* ---------------- Tally XML export ---------------- */
+function xmlEscape(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+function dateToTally(iso){
+  return iso.replace(/-/g,'');
+}
+
+function voucherTypeForRow(r, isDebit){
+  // A category can force its own voucher type (e.g. TDS is always a Journal
+  // entry regardless of the global Payment/Receipt setting).
+  const override = settings.rules.find(rule => rule.ledger === r.category && rule.voucherType);
+  if(override) return override.voucherType;
+  if(settings.voucherMode === 'journal') return 'Journal';
+  return isDebit ? 'Payment' : 'Receipt';
+}
+
+function exportTallyXML(){
+  if(rows.length===0){ toast('No transactions to export'); return; }
+  const missingDate = rows.some(r=>!r.date);
+  if(missingDate){ toast('Some rows are missing a date — please fill them in'); return; }
+  if(!settings.bankLedger){ toast('Set your bank ledger name in Settings first'); return; }
+
+  const vouchers = rows.map(r => {
+    const amount = parseFloat(r.debit || r.credit || 0);
+    if(!amount) return '';
+    const isDebit = !!r.debit;
+    const vchType = voucherTypeForRow(r, isDebit);
+    const categoryLedger = r.category || 'Suspense Account';
+    const bankDate = dateToTally(r.date); // same date since this comes straight off the bank statement — pre-fills BRS "Bank Date" so it's already reconciled on import
+
+    // rule: ledger being CREDITED -> ISDEEMEDPOSITIVE=Yes, amount negative
+    //       ledger being DEBITED  -> ISDEEMEDPOSITIVE=No,  amount positive
+    let bankEntry, catEntry;
+    if(isDebit){
+      // money out: bank credited, category ledger debited
+      bankEntry = {ledger: settings.bankLedger, positive:'Yes', amount: -amount};
+      catEntry  = {ledger: categoryLedger, positive:'No', amount: amount};
+    } else {
+      // money in: bank debited, category ledger credited
+      bankEntry = {ledger: settings.bankLedger, positive:'No', amount: amount};
+      catEntry  = {ledger: categoryLedger, positive:'Yes', amount: -amount};
+    }
+
+    return `
+    <TALLYMESSAGE xmlns:UDF="TallyUDF">
+     <VOUCHER VCHTYPE="${xmlEscape(vchType)}" ACTION="Create">
+      <DATE>${dateToTally(r.date)}</DATE>
+      <EFFECTIVEDATE>${dateToTally(r.date)}</EFFECTIVEDATE>
+      <VOUCHERTYPENAME>${xmlEscape(vchType)}</VOUCHERTYPENAME>
+      <VOUCHERNUMBER>${voucherSeq++}</VOUCHERNUMBER>
+      <NARRATION>${xmlEscape(r.desc)}</NARRATION>
+      <PARTYLEDGERNAME>${xmlEscape(settings.bankLedger)}</PARTYLEDGERNAME>
+      <ALLLEDGERENTRIES.LIST>
+       <LEDGERNAME>${xmlEscape(bankEntry.ledger)}</LEDGERNAME>
+       <ISDEEMEDPOSITIVE>${bankEntry.positive}</ISDEEMEDPOSITIVE>
+       <AMOUNT>${bankEntry.amount.toFixed(2)}</AMOUNT>
+       <BANKALLOCATIONS.LIST>
+        <DATE>${bankDate}</DATE>
+        <TRANSACTIONTYPE>Others</TRANSACTIONTYPE>
+        <AMOUNT>${bankEntry.amount.toFixed(2)}</AMOUNT>
+       </BANKALLOCATIONS.LIST>
+      </ALLLEDGERENTRIES.LIST>
+      <ALLLEDGERENTRIES.LIST>
+       <LEDGERNAME>${xmlEscape(catEntry.ledger)}</LEDGERNAME>
+       <ISDEEMEDPOSITIVE>${catEntry.positive}</ISDEEMEDPOSITIVE>
+       <AMOUNT>${catEntry.amount.toFixed(2)}</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+     </VOUCHER>
+    </TALLYMESSAGE>`;
+  }).filter(Boolean).join('\n');
+
+  const xml = `<ENVELOPE>
+ <HEADER>
+  <TALLYREQUEST>Import Data</TALLYREQUEST>
+ </HEADER>
+ <BODY>
+  <IMPORTDATA>
+   <REQUESTDESC>
+    <REPORTNAME>Vouchers</REPORTNAME>
+    <STATICVARIABLES>
+     <SVCURRENTCOMPANY>${xmlEscape(settings.companyName || '')}</SVCURRENTCOMPANY>
+    </STATICVARIABLES>
+   </REQUESTDESC>
+   <REQUESTDATA>${vouchers}
+   </REQUESTDATA>
+  </IMPORTDATA>
+ </BODY>
+</ENVELOPE>`;
+
+  const blob = new Blob([xml], {type:'application/xml'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ledgerflow-tally-import-${new Date().toISOString().slice(0,10)}.xml`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Tally XML exported — import via Gateway of Tally → Import Data → Vouchers');
+}
+
+/* ---------------- init ---------------- */
+loadSettings();
+renderTable();
+</script>
+</body>
+</html>
